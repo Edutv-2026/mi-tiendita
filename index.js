@@ -21,10 +21,9 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 app.use(helmet({ crossOriginResourcePolicy: false }));
 
-// --- CONFIGURACIÓN DE CORS PARA PRODUCCIÓN ---
+// --- CORS CORREGIDO PARA VERCEL ---
 app.use(cors({
   origin: ["https://mi-tiendita-client-qilpkdndv-edutv.vercel.app", "https://mi-tiendita-client.vercel.app"],
-  methods: ["GET", "POST", "PUT", "DELETE"],
   credentials: true
 }));
 
@@ -46,10 +45,12 @@ db.connect(err => {
   else console.log("✅ Conectado a la base de datos remota");
 });
 
+// MONITOREO: Registro de auditoría
 const registrarLog = (usuario, accion, ip) => {
     db.query('INSERT INTO logs (usuario, accion, ip_address) VALUES (?, ?, ?)', [usuario || 'Sistema', accion, ip || '0.0.0.0']);
 };
 
+// SEGURIDAD JWT
 const verificarToken = (req, res, next) => {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(403).json({ error: "Token requerido" });
@@ -66,6 +67,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
+// LÓGICA MULTISESIÓN
 let sesionesActivas = {}; 
 io.on('connection', (socket) => {
   socket.on('register_connection', (username) => {
@@ -84,28 +86,29 @@ io.on('connection', (socket) => {
   });
 });
 
-// --- REGISTRO ---
+// --- REGISTRO CON CORRECCIÓN DE ROLES ---
 app.post('/api/register', async (req, res) => {
   const { usuario, email, telefono, clave, rol, codigoAdmin } = req.body;
-  const rolesMap = { "Administrador": "admin", "Vendedor": "user" };
-  const rolReal = rolesMap[rol] || 'user';
+  
+  // Traducimos lo que manda el Front a lo que entiende la DB
+  let rolReal = 'user';
+  if (rol === 'admin' || rol === 'Administrador') rolReal = 'admin';
 
   if (rolReal === 'admin' && codigoAdmin !== ADMIN_REGISTRATION_CODE) {
-    return res.status(403).json({ error: "Código de Autorización Incorrecto" });
+    return res.status(403).json({ error: "Código Admin incorrecto" });
   }
 
   try {
     const hash = await bcrypt.hash(clave, 10);
     const sql = 'INSERT INTO usuarios (usuario, email, telefono, clave, rol) VALUES (?, ?, ?, ?, ?)';
     db.query(sql, [usuario, email, telefono || '', hash, rolReal], (err) => {
-      if (err) return res.status(500).json({ error: "El usuario o email ya existe en el sistema" });
+      if (err) return res.status(500).json({ error: "Error MySQL: " + err.sqlMessage });
       registrarLog(usuario, "REGISTRO EXITOSO", req.ip);
       res.json({ success: true });
     });
-  } catch (e) { res.status(500).json({ error: "Error interno del servidor" }); }
+  } catch (e) { res.status(500).json({ error: "Error interno" }); }
 });
 
-// --- LOGIN ---
 app.post('/api/login', (req, res) => {
   const { usuario, clave } = req.body;
   db.query('SELECT * FROM usuarios WHERE usuario = ?', [usuario], async (err, result) => {
@@ -120,7 +123,6 @@ app.post('/api/login', (req, res) => {
   });
 });
 
-// --- PRODUCTOS ---
 app.get('/api/productos', verificarToken, (req, res) => {
     db.query('SELECT * FROM productos', (err, r) => res.json(r));
 });
@@ -140,6 +142,7 @@ app.post('/api/productos', verificarToken, upload.single('imagen'), (req, res) =
 });
 
 app.delete('/api/productos/:id', verificarToken, (req, res) => {
+    // REGLA: Admin o Eduardo Mtz pueden borrar
     if (req.user.rol !== 'admin' && req.user.user !== 'Eduardo Mtz') return res.status(403).json({ error: "No autorizado" });
     db.query('DELETE FROM productos WHERE id = ?', [req.params.id], () => {
         registrarLog(req.user.user, `BORRÓ ID: ${req.params.id}`, req.ip);
@@ -153,7 +156,6 @@ app.get('/api/stats', verificarToken, (req, res) => {
     });
 });
 
-// --- SUPER USUARIO ---
 app.post('/api/kick', verificarToken, (req, res) => {
   if (req.user.user !== 'Eduardo Mtz') return res.status(403).send("No autorizado");
   const { usuarioExpulsar } = req.body;
@@ -170,4 +172,4 @@ app.get('/api/logs', verificarToken, (req, res) => {
     db.query('SELECT * FROM logs ORDER BY fecha DESC LIMIT 50', (err, r) => res.json(r));
 });
 
-server.listen(PORT, () => console.log('🚀 Servidor Real puerto ' + PORT));
+server.listen(PORT, () => console.log('🚀 SERVER NITRO REAL ' + PORT));
