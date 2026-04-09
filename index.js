@@ -92,25 +92,46 @@ io.on('connection', (socket) => {
 // ==========================================
 
 app.post('/api/register', async (req, res) => {
-  const { usuario, email, telefono, clave, rol, codigoAdmin } = req.body;
-  const rolesMap = { "Administrador": "admin", "Vendedor": "user" };
-  const rolReal = rolesMap[rol] || 'user';
+  // 1. Recibimos los datos (mapeamos por si vienen como u, p, e, t)
+  const usuario = req.body.usuario || req.body.u;
+  const email = req.body.email || req.body.e;
+  const telefono = req.body.telefono || req.body.t;
+  const clave = req.body.clave || req.body.p;
+  const rolOriginal = req.body.rol;
+  const codigoAdmin = req.body.codigoAdmin || req.body.code;
 
+  console.log("📥 Intento de registro para:", usuario);
+
+  // 2. Traducción de Roles para MySQL
+  // MySQL espera 'admin' o 'user'. Si viene 'Administrador' o 'Vendedor', lo cambiamos:
+  let rolReal = 'user';
+  if (rolOriginal === 'Administrador' || rolOriginal === 'admin') rolReal = 'admin';
+  if (rolOriginal === 'Vendedor' || rolOriginal === 'user') rolReal = 'user';
+
+  // 3. Validación de Admin
   if (rolReal === 'admin' && codigoAdmin !== ADMIN_REGISTRATION_CODE) {
-    return res.status(403).json({ error: "Código de Autorización Incorrecto" });
+    return res.status(403).json({ error: "Código de Admin incorrecto" });
   }
 
   try {
+    // 4. Encriptar
     const hash = await bcrypt.hash(clave, 10);
+    
+    // 5. Insertar en MySQL
     const sql = 'INSERT INTO usuarios (usuario, email, telefono, clave, rol) VALUES (?, ?, ?, ?, ?)';
-    db.query(sql, [usuario, email, telefono, hash, rolReal], (err) => {
-      if (err) return res.status(500).json({ error: err.sqlMessage });
-      registrarLog(usuario, "REGISTRO EXITOSO", req.ip);
+    db.query(sql, [usuario, email, telefono || '', hash, rolReal], (err) => {
+      if (err) {
+        console.error("❌ ERROR MYSQL AL REGISTRAR:", err.sqlMessage);
+        return res.status(500).json({ error: "Error en base de datos: " + err.sqlMessage });
+      }
+      console.log("✅ Usuario registrado con éxito:", usuario);
       res.json({ success: true });
     });
-  } catch (e) { res.status(500).json({ error: "Error interno" }); }
+  } catch (e) {
+    console.error("❌ ERROR DE SISTEMA:", e);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
 });
-
 app.post('/api/login', (req, res) => {
   const { usuario, clave } = req.body;
   db.query('SELECT * FROM usuarios WHERE usuario = ?', [usuario], async (err, result) => {
