@@ -23,7 +23,10 @@ const io = new Server(server, { cors: { origin: "*" } });
 
 // --- MIDDLEWARES DE SEGURIDAD (REQUERIMIENTO PROFE) ---
 app.use(helmet({ crossOriginResourcePolicy: false }));
-app.use(cors());
+app.use(cors({
+  origin: "https://mi-tiendita-client-qilpkdndv-edutv.vercel.app", // <--- TU LINK DE VERCEL
+  credentials: true
+}));
 app.use(express.json());
 app.use(morgan('combined')); // Auditoría: Monitoreo de cada acceso
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
